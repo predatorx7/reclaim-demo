@@ -18,63 +18,68 @@ export default function HRPortal({ next }: any) {
   const [selectedProvider, setSelectedProvider] = useState<string>(HR_PROVIDERS[0].id);
 
   /**
-   * ✅ Reclaim Protocol Verification Flow
+   * Initiates the Reclaim Protocol Verification Flow.
    * 
-   * This is the core Reclaim integration logic. Let's walk through it step-by-step!
+   * This method coordinates the core Reclaim integration process. 
+   * It securely retrieves the expected session configuration from the backend, 
+   * initializes the frontend SDK, and manages the cryptographic verification lifecycle.
    */
   const startVerification = useCallback(async () => {
-    console.log("[HRPortal] Starting verification...");
+    console.log("Starting verification process...");
     setErrorMessage("");
     setResponseData(null);
     setVerificationStep("verifying");
     setIsLoading(true);
 
     try {
-      // 1️⃣ SECURELY FETCH CONFIG FROM BACKEND
-      // We ask our backend to generate the session config because it securely holds our APP_SECRET.
-      // Exposing the Reclaim APP_SECRET directly in the frontend is a security hazard!
+      // 1. Fetch the Session Configuration Securely.
+      // The Reclaim APP_SECRET must never be exposed to the client application.
+      // Therefore, the backend generates the ReclaimProofRequest configuration 
+      // utilizing the secret and transmits it securely to the frontend.
       const configResponse = await getReclaimConfig(selectedProvider);
 
       if (!configResponse || !configResponse.reclaimProofRequestConfig) {
-        throw new Error("Invalid config response from backend");
+        throw new Error("Invalid configuration response received from backend");
       }
 
       const { reclaimProofRequestConfig } = configResponse;
 
-      // 2️⃣ RECONSTRUCT THE PROOF REQUEST
-      // The backend has handed us a pre-signed JSON config string. We parse it back into the
-      // native JS SDK `ReclaimProofRequest` object to control the frontend UI logic.
+      // 2. Reconstruct the Proof Request.
+      // The frontend parses the serialized session configuration provided by the
+      // backend into a functional `ReclaimProofRequest` instance. This allows the 
+      // client-side SDK to mediate the user interface flow properly.
       const reclaimProofRequest = await ReclaimProofRequest.fromJsonString(
         reclaimProofRequestConfig
       );
 
-      // 3️⃣ OPEN THE QR / VERIFICATION UI
-      // This immediately triggers the verification flow. The user will be prompted to prove their data seamlessly safely!
-      // We also hold onto the `flowHandle` so we can programmatically close it later.
+      // 3. Trigger the User Interface.
+      // Invoking triggerReclaimFlow displays the verification modal or QR code.
+      // It returns a handle that allows the application to programmatically close 
+      // the visual interface once the verification protocol concludes.
       const flowHandle = await reclaimProofRequest.triggerReclaimFlow();
 
-      // 4️⃣ SET UP THE LISTENER CALLBACKS
-      // We await `.startSession()` which perpetually polls for the verified proof status and handles callbacks.
+      // 4. Set Up the Asynchronous Session Listeners.
+      // The startSession method polls the Reclaim network for updates and executes 
+      // the corresponding callbacks when the user completes or cancels the verification flow.
       await reclaimProofRequest.startSession({
         onSuccess: async (proofs) => {
           try {
-            // Reclaim has yielded a proof that the user verified!
-            console.log("[HRPortal] Raw proofs received:", proofs);
+            console.log("Raw protocol proofs received:", proofs);
 
-            // Programmatically close the QR code/modal gracefully.
+            // Programmatically close the verification modal/QR code interface.
             flowHandle?.close();
 
             if (!proofs) {
-              throw new Error("Proof unexpectedly empty");
+              throw new Error("Proof payload unexpectedly empty");
             }
 
-            // 5️⃣ SEND THE PROOF TO OUR BACKEND FOR VERIFICATION
-            // Now we send the proof object directly to our Fastify backend.
-            // Even though Reclaim generated this, we must verify the cryptographic signatures 
-            // natively on our server to be absolutely certain it wasn't intercepted or modified.
+            // 5. Transmit the Proof for Verification to your backend.
+            // When the SDK returns a proof, the frontend transmits it to the backend.
+            // The backend must use verifyProof from @reclaimprotocol/js-sdk to cryptographically verify and validate the proof to ensure 
+            // the payload has not been intercepted, spoofed, or modified.
             const result = await verifyProofResponse(proofs);
 
-            // Verification succeeded!
+            // Upon successful backend verification, the flow is considered complete.
             setResponseData(result);
             setVerificationStep("completed");
 
@@ -87,21 +92,22 @@ export default function HRPortal({ next }: any) {
         },
 
         onError: (error) => {
-          console.error("[HRPortal] SDK Cancelled or Errored:", error);
-          setErrorMessage(`Verification cancelled by user or failed.`);
+          console.error("SDK verification cancelled or errored:", error);
+          setErrorMessage(`Verification cancelled by the user or failed network connection.`);
           setVerificationStep("choice");
           setIsLoading(false);
         },
 
         verificationConfig: {
-          // This tells the local SDK session to bypass structural assertion since our backend
-          // will fully mathematically verify it using verifyProof() anyway!
+          // By specifying this configuration, the local SDK session bypasses its 
+          // default structural assertion checking, deferring the rigorous mathematical 
+          // verification completely to the robust server-side verifyProof() function.
           dangerouslyDisableContentValidation: true,
         }
       });
 
     } catch (err) {
-      console.error("[HRPortal] Critical Error:", err);
+      console.error("Critical verification error:", err);
       setErrorMessage(`Unexpected setup error: ${String(err)}`);
       setVerificationStep("choice");
       setIsLoading(false);
