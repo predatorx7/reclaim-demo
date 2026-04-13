@@ -2,7 +2,7 @@
     "examplepayroll": {
         "reclaim": {
             "provider_id": "example",
-            "provider_version": ""
+            "provider_version": "3.0.0"
         }
     }
 }
